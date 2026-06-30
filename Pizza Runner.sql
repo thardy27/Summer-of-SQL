@@ -1,3 +1,5 @@
+--Part A
+
 -- 1. How many pizzas were ordered?
 
 select
@@ -125,4 +127,100 @@ from pizza_runner.customer_orders as co
     join pizza_runner.pizza_names pn
     	on co.pizza_id = pn.pizza_id
 group by hour
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-- Part B
+
+-- 1.How many runners signed up for each 1 week period? (i.e. week starts 2021-01-01)
+
+with runner_signups as (	
+	select
+  		runner_id
+  		, registration_date
+  		, date_trunc('week', registration_date) + INTERVAL '4 day' as start_week 
+  
+  	from pizza_runner.runners
+  )
+  
+  select
+  	start_week
+    , count (start_week) as signups
+  from runner_signups
+  group by start_week
+  
+-- 2.What was the average time in minutes it took for each runner to arrive at the Pizza Runner HQ to pickup the order?
+
+
+with order_time as (
+	select
+		order_id
+  		, order_time
+
+	from pizza_runner.customer_orders
+ )
+ ,
+ pickup_time as (
+ 	select
+   		order_id
+   		, runner_id
+   		, cast(pickup_time as timestamp) as pickup_time
+  from pizza_runner.runner_orders
+  where pickup_time != 'null'
+  )
+ 
+
+	select 
+		p.runner_id
+        ,round(AVG(EXTRACT(EPOCH FROM (p.pickup_time - o.order_time)) / 60)) AS avg_time_minutes
+  	from order_time as o
+  	inner join pickup_time as p
+  		on o.order_id = p.order_id
+    group by p.runner_id
+
+-- 3.Is there any relationship between the number of pizzas and how long the order takes to prepare?
+
+with order_info as (
+
+	select 
+    	co.order_id
+        , count(co.pizza_id) as no_of_pizzas
+        , AVG(EXTRACT(EPOCH FROM (ro.pickup_time::TIMESTAMP - co.order_time::TIMESTAMP)) / 60) AS prep_time
+	from pizza_runner.customer_orders as co
+  	join pizza_runner.runner_orders as ro
+  		on co.order_id = ro.order_id
+    where pickup_time != 'null'
+    group by 1
+)
+
+select
+	no_of_pizzas
+    , avg(prep_time) as avg_prep_time
+    
+from order_info
+group by 1
+order by 2 desc
+
+-- 4.What was the average distance travelled for each customer?  IMCOMPLETE
+
+with order_info as (
+
+	select 
+    	co.order_id as order_id
+        , replace (ro.distance, 'km', '') as distance
+	from pizza_runner.customer_orders as co
+  	join pizza_runner.runner_orders as ro
+  		on co.order_id = ro.order_id
+    where ro.distance != 'null'
+
+)
+
+select
+	order_id
+    , avg(to_number(distance, '999D99') as avg_distance
+from order_info
+group by 1
+-- 5.What was the difference between the longest and shortest delivery times for all orders?
+-- 6.What was the average speed for each runner for each delivery and do you notice any trend for these values?
+-- 7.hat is the successful delivery percentage for each runner?
 
