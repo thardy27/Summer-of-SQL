@@ -206,7 +206,7 @@ order by 2 desc
 with order_info as (
 
 	select 
-    	co.order_id as order_id
+    	co.customer_id as customer_id
         , replace (ro.distance, 'km', '') as distance
 	from pizza_runner.customer_orders as co
   	join pizza_runner.runner_orders as ro
@@ -216,11 +216,64 @@ with order_info as (
 )
 
 select
-	order_id
-    , avg(to_number(distance, '999D99') as avg_distance
+	customer_id
+    ,  AVG(CAST(distance AS DECIMAL(3, 1))) AS avg_distance_travelled 
 from order_info
 group by 1
+
 -- 5.What was the difference between the longest and shortest delivery times for all orders?
+
+with clean_distance as (
+	select 
+  		order_id
+  		, cast(left(duration, 2) as Integer) as duration
+  	from pizza_runner.runner_orders
+  	where duration != 'null'
+)
+
+select
+	max(duration)-min(duration) as delivery_difference
+from clean_distance
+	
 -- 6.What was the average speed for each runner for each delivery and do you notice any trend for these values?
--- 7.hat is the successful delivery percentage for each runner?
+
+with cleaned as (
+	select 
+  		order_id
+        , runner_id
+  		, (cast(left(duration, 2) as decimal)/60) as duration_hr
+  		, (cast(replace(distance, 'km', '') AS decimal(3, 1))) as distance_km
+  	from pizza_runner.runner_orders
+  	where duration != 'null'
+)
+
+select
+	order_id
+    , runner_id
+    , (distance_km / duration_hr) as km_h
+from cleaned
+order by km_h desc
+
+-- 7.What is the successful delivery percentage for each runner?
+
+with runner_deliveries as (
+select 
+     runner_id
+	, sum(case 
+    	when duration = 'null' then 0
+        else 1
+      end) as deliveries
+    , count (order_id) as no_of_orders
+      
+from pizza_runner.runner_orders
+group by 1
+  )
+  
+select
+	runner_id
+    , cast(deliveries as decimal) / no_of_orders * 100 as delivery_percent
+from runner_deliveries
+
+
+
 
