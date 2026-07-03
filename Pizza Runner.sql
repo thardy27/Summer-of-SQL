@@ -274,6 +274,357 @@ select
     , cast(deliveries as decimal) / no_of_orders * 100 as delivery_percent
 from runner_deliveries
 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+-- Part C
 
+-- 1.What are the standard ingredients for each pizza?
 
+with split_recipe as (
+
+select
+  pizza_id
+  , cast(string_to_table(toppings, ',') as integer) as toppings
+from pizza_runner.pizza_recipes
+)
+
+select
+	pn.pizza_name
+    , pt.topping_name
+from pizza_runner.pizza_names as pn
+join split_recipe as pr
+	on pn.pizza_id = pr.pizza_id
+join pizza_runner.pizza_toppings as pt
+	on pr.toppings = pt.topping_id
+
+-- 2.What was the most commonly added extra?
+
+with split_orders as (
+
+select
+  cast(string_to_table(extras, ',') as integer) as extras
+from pizza_runner.customer_orders
+where extras != 'null' and length(extras) > 0
+)
+
+select
+	topping_name
+    , count(extras) as no_of_orders
+from split_orders as so
+join pizza_runner.pizza_toppings as pt
+	on so.extras = pt.topping_id
+group by 1
+order by 2 desc
+
+-- 3.What was the most common exclusion?
+
+with split_orders as (
+
+select
+  cast(string_to_table(exclusions, ',') as integer) as exclusions
+from pizza_runner.customer_orders
+where exclusions != 'null' and length(exclusions) > 0
+)
+
+select
+	topping_name
+    , count(exclusions) as no_of_orders
+from split_orders as so
+join pizza_runner.pizza_toppings as pt
+	on so.exclusions = pt.topping_id
+group by 1
+order by 2 desc
+
+-- 4.Generate an order item for each record in the customers_orders table in the format of one of the following:
+-- 			Meat Lovers
+-- 			Meat Lovers - Exclude Beef
+-- 			Meat Lovers - Extra Bacon
+-- 			Meat Lovers - Exclude Cheese, Bacon - Extra Mushroom, Peppers
+
+with orders as (
+
+select distinct
+  co.order_id
+  ,co.pizza_id
+  , s.value as topping_id
+from pizza_runner.customer_orders as co
+join pizza_runner.pizza_recipes as pr
+  	on co.pizza_id = pr.pizza_id
+left join lateral string_to_table(toppings, ', ') as s(value)
+	on true
+)
+,
+
+exclusions as (
+
+select
+	co.order_id
+    , co.pizza_id
+    , s.value as exclusions
+    , topping_name
+from pizza_runner.customer_orders as co
+join lateral string_to_table(exclusions, ', ') as s(value)
+	on true
+join pizza_runner.pizza_toppings as pr
+  	on cast(pr.topping_id as text) = s.value
+where exclusions != 'null' and length(exclusions) >0
+
+)
+,
+
+extras as ( 
+
+select
+	co.order_id
+    , co.pizza_id
+    , s.value as extras
+    , topping_name
+  
+from pizza_runner.customer_orders as co
+left join lateral string_to_table(extras, ', ') as s(value)
+	on true
+left join pizza_runner.pizza_toppings as pt
+	on cast(pt.topping_id as text) = s.value
+where extras != 'null' and length(extras) > 0
+
+)
+,
+
+orders_exclusions_extras as (
+
+select
+	o.order_id
+	, pn.pizza_name
+    ,string_agg(distinct xc.topping_name, ', ') as exclusions
+    , string_agg(distinct xt.topping_name, ', ') as extras
+from orders as o
+left join exclusions as xc
+	on o.order_id = xc.order_id and o.pizza_id = xc.pizza_id
+left join extras as xt
+	on o.order_id = xt.order_id and o.pizza_id = xt.pizza_id
+inner join pizza_runner.pizza_names as pn
+	on o.pizza_id = pn.pizza_id
+where exclusions != 'null' or extras != 'null'
+group by 1, 2
+order by 1
+  
+)
+
+select
+	order_id
+    , pizza_name
+    , pizza_name || case when exclusions != 'null' then ' - Exclude ' else '' end || exclusions as Name_xcl
+    , pizza_name || case when extras != 'null' then ' - Extra ' else '' end || extras as Name_xtr
+    , pizza_name || case when exclusions != 'null' then ' - Exclude ' else '' end || exclusions || case when extras != 'null' then ' - Extra ' else '' end || extras as full_info
+from orders_exclusions_extras
+
+-- 5.Generate an alphabetically ordered comma separated ingredient list for each pizza order from the customer_orders table and add a 2x in front of any relevant ingredients
+--		 For example: "Meat Lovers: 2xBacon, Beef, ... , Salami"
+
+with orders as (
+
+select distinct
+  cast(co.order_id as text) as order_id
+  ,co.pizza_id
+  , s.value as topping_id
+from pizza_runner.customer_orders as co
+join pizza_runner.pizza_recipes as pr
+  	on co.pizza_id = pr.pizza_id
+left join lateral string_to_table(toppings, ', ') as s(value)
+	on true
+)
+,
+
+exclusions as (
+
+select
+    cast(co.order_id as text) as order_id
+    , co.pizza_id
+    , s.value as exclusions
+    , topping_name
+from pizza_runner.customer_orders as co
+join lateral string_to_table(exclusions, ', ') as s(value)
+	on true
+join pizza_runner.pizza_toppings as pr
+  	on cast(pr.topping_id as text) = s.value
+where exclusions != 'null' and length(exclusions) >0
+
+)
+,
+
+extras as ( 
+
+select
+	 cast(co.order_id as text) as order_id
+    , co.pizza_id
+    , s.value as extras
+    , topping_name
+  
+from pizza_runner.customer_orders as co
+left join lateral string_to_table(extras, ', ') as s(value)
+	on true
+left join pizza_runner.pizza_toppings as pt
+	on cast(pt.topping_id as text) = s.value
+where extras != 'null' and length(extras) > 0
+
+),
+
+final_toppings as (
+
+select
+	o.order_id
+    , o.pizza_id
+    , o.topping_id
+from orders as o
+left join exclusions as xcl
+	on o.order_id = xcl.order_id and o.pizza_id = xcl.pizza_id and o.topping_id = xcl.exclusions
+where  xcl.exclusions is null
+
+union all
+
+select
+	order_id
+    , pizza_id as pizza_id
+    , extras
+from extras
+
+  
+),
+
+item_names as (
+
+select
+	ft.order_id
+    , pizza_name
+    , topping_name
+from final_toppings as ft
+join pizza_runner.pizza_names as pn
+	on ft.pizza_id = pn.pizza_id 
+join pizza_runner.pizza_toppings as pt
+	on ft.topping_id :: int = pt.topping_id 
+order by 1, 2, 3
+  
+),
+
+topping_count as (
+
+select
+  order_id
+  , pizza_name
+  , topping_name
+  , cast(count (*) as text) as item_count
+from item_names
+group by 1,2,3
+),
+
+final_cte as (
+
+select
+	order_id
+    , pizza_name
+    , string_agg ((case when item_count = '1' then'' else item_count || 'x ' end || topping_name), ', ') as count_topping
+from topping_count
+group by 1,2
+
+)  
+
+select
+    pizza_name || ': ' || count_topping as order
+from final_cte
+order by order_id
+-- 6. What is the total quantity of each ingredient used in all delivered pizzas sorted by most frequent first?
+
+with orders as ( -- table of every topping on every base pizza
+
+select distinct
+  cast(co.order_id as text) as order_id
+  ,co.pizza_id
+  , s.value as topping_id
+from pizza_runner.customer_orders as co
+join pizza_runner.pizza_recipes as pr
+  	on co.pizza_id = pr.pizza_id
+left join lateral string_to_table(toppings, ', ') as s(value)
+	on true
+)
+,
+
+exclusions as ( -- list of all excluded items
+
+select
+    cast(co.order_id as text) as order_id
+    , co.pizza_id
+    , s.value as exclusions
+    , topping_name
+from pizza_runner.customer_orders as co
+join lateral string_to_table(exclusions, ', ') as s(value)
+	on true
+join pizza_runner.pizza_toppings as pr
+  	on cast(pr.topping_id as text) = s.value
+where exclusions != 'null' and length(exclusions) >0
+
+)
+,
+
+extras as ( -- list of all extras
+
+select
+	 cast(co.order_id as text) as order_id
+    , co.pizza_id
+    , s.value as extras
+    , topping_name
+  
+from pizza_runner.customer_orders as co
+left join lateral string_to_table(extras, ', ') as s(value)
+	on true
+left join pizza_runner.pizza_toppings as pt
+	on cast(pt.topping_id as text) = s.value
+where extras != 'null' and length(extras) > 0
+
+),
+
+final_toppings as ( -- final ordered ingredients
+
+select
+	o.order_id
+    , o.pizza_id
+    , o.topping_id
+from orders as o
+left join exclusions as xcl
+	on o.order_id = xcl.order_id and o.pizza_id = xcl.pizza_id and o.topping_id = xcl.exclusions
+where  xcl.exclusions is null
+
+union all
+
+select
+	order_id
+    , pizza_id as pizza_id
+    , extras
+from extras
+
+  
+),
+
+item_names as (
+
+select
+	ft.order_id
+    , pizza_name
+    , topping_name
+from final_toppings as ft
+join pizza_runner.pizza_names as pn
+	on ft.pizza_id = pn.pizza_id 
+join pizza_runner.pizza_toppings as pt
+	on ft.topping_id :: int = pt.topping_id 
+order by 1, 2, 3
+  
+)
+
+select
+  it.topping_name
+  , count (*) as item_count
+from item_names as it
+join pizza_runner.runner_orders as ro
+	on it.order_id:: integer = ro.order_id
+where ro.distance != 'null'
+group by 1
+order by 2 desc
